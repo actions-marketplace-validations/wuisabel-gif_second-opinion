@@ -7,6 +7,103 @@ use std::env;
 const ANTHROPIC_VERSION: &str = "2023-06-01";
 const DEFAULT_ANTHROPIC_MODEL: &str = "claude-sonnet-4-6";
 const DEFAULT_OPENAI_MODEL: &str = "gpt-5.6-sol";
+const DEFAULT_COMPATIBLE_BASE_URL: &str = "https://api.openai.com/v1";
+
+struct ChatPreset {
+    aliases: &'static [&'static str],
+    base_url: Option<&'static str>,
+    default_model: Option<&'static str>,
+    api_key_env: Option<&'static str>,
+}
+
+const CHAT_PRESETS: &[ChatPreset] = &[
+    ChatPreset {
+        aliases: &["grok", "xai"],
+        base_url: Some("https://api.x.ai/v1"),
+        default_model: Some("grok-4"),
+        api_key_env: Some("XAI_API_KEY"),
+    },
+    ChatPreset {
+        aliases: &["kimi", "moonshot"],
+        base_url: Some("https://api.moonshot.ai/v1"),
+        default_model: Some("kimi-k2.5"),
+        api_key_env: Some("MOONSHOT_API_KEY"),
+    },
+    ChatPreset {
+        aliases: &["pi", "inflection"],
+        base_url: None,
+        default_model: Some("pi"),
+        api_key_env: Some("INFLECTION_API_KEY"),
+    },
+    ChatPreset {
+        aliases: &["deepseek"],
+        base_url: Some("https://api.deepseek.com"),
+        default_model: Some("deepseek-chat"),
+        api_key_env: Some("DEEPSEEK_API_KEY"),
+    },
+    ChatPreset {
+        aliases: &["gemini", "google"],
+        base_url: Some("https://generativelanguage.googleapis.com/v1beta/openai"),
+        default_model: Some("gemini-2.5-flash"),
+        api_key_env: Some("GOOGLE_API_KEY"),
+    },
+    ChatPreset {
+        aliases: &["groq"],
+        base_url: Some("https://api.groq.com/openai/v1"),
+        default_model: Some("llama-3.3-70b-versatile"),
+        api_key_env: Some("GROQ_API_KEY"),
+    },
+    ChatPreset {
+        aliases: &["mistral"],
+        base_url: Some("https://api.mistral.ai/v1"),
+        default_model: Some("mistral-large-latest"),
+        api_key_env: Some("MISTRAL_API_KEY"),
+    },
+    ChatPreset {
+        aliases: &["openrouter"],
+        base_url: Some("https://openrouter.ai/api/v1"),
+        default_model: None,
+        api_key_env: Some("OPENROUTER_API_KEY"),
+    },
+    ChatPreset {
+        aliases: &["qwen", "dashscope"],
+        base_url: Some("https://dashscope-intl.aliyuncs.com/compatible-mode/v1"),
+        default_model: Some("qwen-plus"),
+        api_key_env: Some("DASHSCOPE_API_KEY"),
+    },
+    ChatPreset {
+        aliases: &["together"],
+        base_url: Some("https://api.together.xyz/v1"),
+        default_model: None,
+        api_key_env: Some("TOGETHER_API_KEY"),
+    },
+    ChatPreset {
+        aliases: &["fireworks"],
+        base_url: Some("https://api.fireworks.ai/inference/v1"),
+        default_model: None,
+        api_key_env: Some("FIREWORKS_API_KEY"),
+    },
+    ChatPreset {
+        aliases: &["perplexity"],
+        base_url: Some("https://api.perplexity.ai"),
+        default_model: Some("sonar"),
+        api_key_env: Some("PERPLEXITY_API_KEY"),
+    },
+];
+
+fn chat_preset(value: &str) -> Option<&'static ChatPreset> {
+    CHAT_PRESETS
+        .iter()
+        .find(|preset| preset.aliases.iter().any(|alias| *alias == value))
+}
+
+fn env_chat_preset() -> Option<&'static ChatPreset> {
+    env::var("REVIEW_PROVIDER")
+        .ok()
+        .map(|value| value.trim().to_ascii_lowercase())
+        .as_deref()
+        .and_then(chat_preset)
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Provider {
@@ -28,6 +125,9 @@ impl Provider {
     }
 
     fn parse(value: &str) -> Result<Self> {
+        if chat_preset(value).is_some() {
+            return Ok(Self::OpenAiChat);
+        }
         match value {
             "anthropic" | "claude" => Ok(Self::Anthropic),
             "openai" | "openai-responses" | "responses" => Ok(Self::OpenAiResponses),
@@ -36,8 +136,9 @@ impl Provider {
             "codex-broker" | "codex-subscription" => Ok(Self::CodexBroker),
             "webhook" | "custom" => Ok(Self::Webhook),
             unsupported => bail!(
-                "unsupported REVIEW_PROVIDER '{unsupported}'; expected anthropic, openai-responses, \
-                 openai-compatible, codex, codex-broker, or webhook"
+                "unsupported REVIEW_PROVIDER '{unsupported}'; expected anthropic, claude, grok, kimi, \
+                 pi, openai-responses, openai-compatible, deepseek, gemini, groq, mistral, openrouter, \
+                 qwen, codex, codex-broker, or webhook"
             ),
         }
     }
@@ -60,7 +161,13 @@ impl Provider {
         match self {
             Self::Anthropic => Ok(DEFAULT_ANTHROPIC_MODEL.to_string()),
             Self::OpenAiResponses => Ok(DEFAULT_OPENAI_MODEL.to_string()),
-            Self::OpenAiChat => bail!("REVIEW_MODEL is required for openai-compatible providers"),
+            Self::OpenAiChat => {
+                if let Some(model) = env_chat_preset().and_then(|preset| preset.default_model) {
+                    Ok(model.to_string())
+                } else {
+                    bail!("REVIEW_MODEL is required for openai-compatible providers")
+                }
+            }
             Self::CodexCli | Self::CodexBroker => Ok(DEFAULT_OPENAI_MODEL.to_string()),
             Self::Webhook => Ok(String::new()),
         }
@@ -79,7 +186,15 @@ impl Provider {
                     .or_else(|| non_empty_env("OPENAI_API_KEY"))
                     .context("OPENAI_API_KEY or REVIEW_API_KEY not set")?,
             )),
-            Self::OpenAiChat => Ok(generic.or_else(|| non_empty_env("OPENAI_API_KEY"))),
+            Self::OpenAiChat => {
+                Ok(generic
+                    .or_else(|| non_empty_env("OPENAI_API_KEY"))
+                    .or_else(|| {
+                        env_chat_preset()
+                            .and_then(|preset| preset.api_key_env)
+                            .and_then(non_empty_env)
+                    }))
+            }
             Self::CodexCli | Self::CodexBroker => Ok(None),
             Self::Webhook => Ok(generic),
         }
@@ -238,7 +353,7 @@ fn run_anthropic(api_key: &str, model: &str, request: &ReviewRequest<'_>) -> Res
         "system": review_system_prompt(),
         "messages": [{ "role": "user", "content": request.user_message() }],
     });
-    let response = ureq::post("https://api.anthropic.com/v1/messages")
+    let response = ureq::post(&anthropic_messages_url())
         .set("x-api-key", api_key)
         .set("anthropic-version", ANTHROPIC_VERSION)
         .set("content-type", "application/json")
@@ -269,7 +384,7 @@ fn run_openai(api_key: &str, model: &str, request: &ReviewRequest<'_>) -> Result
             "schema": review_json_schema()
         }}
     });
-    let url = format!("{}/responses", review_base_url().trim_end_matches('/'));
+    let url = format!("{}/responses", review_base_url()?.trim_end_matches('/'));
     let response = ureq::post(&url)
         .set("Authorization", &format!("Bearer {api_key}"))
         .set("Content-Type", "application/json")
@@ -292,7 +407,7 @@ fn run_openai_chat(
     });
     let url = format!(
         "{}/chat/completions",
-        review_base_url().trim_end_matches('/')
+        review_base_url()?.trim_end_matches('/')
     );
     let response = send_generic_request(&url, "OpenAI-compatible API", api_key, body)?;
     parse_openai_chat_response(&response)
@@ -318,10 +433,39 @@ fn run_webhook(
     parse_generic_review_response(&response)
 }
 
-fn review_base_url() -> String {
-    non_empty_env("REVIEW_BASE_URL")
-        .or_else(|| non_empty_env("OPENAI_BASE_URL"))
-        .unwrap_or_else(|| "https://api.openai.com/v1".to_string())
+fn anthropic_messages_url() -> String {
+    join_anthropic_messages_url(
+        non_empty_env("ANTHROPIC_BASE_URL")
+            .or_else(|| non_empty_env("REVIEW_BASE_URL"))
+            .as_deref(),
+    )
+}
+
+fn join_anthropic_messages_url(base: Option<&str>) -> String {
+    let base = base
+        .unwrap_or("https://api.anthropic.com")
+        .trim_end_matches('/');
+    if base.ends_with("/messages") {
+        return base.to_string();
+    }
+    if base.ends_with("/v1") {
+        return format!("{base}/messages");
+    }
+    format!("{base}/v1/messages")
+}
+
+fn review_base_url() -> Result<String> {
+    if let Some(url) = non_empty_env("REVIEW_BASE_URL").or_else(|| non_empty_env("OPENAI_BASE_URL"))
+    {
+        return Ok(url);
+    }
+    if let Some(preset) = env_chat_preset() {
+        if let Some(url) = preset.base_url {
+            return Ok(url.to_string());
+        }
+        bail!("REVIEW_BASE_URL is required for Inflection Pi; point it at an OpenAI-compatible gateway");
+    }
+    Ok(DEFAULT_COMPATIBLE_BASE_URL.to_string())
 }
 
 fn send_generic_request(
@@ -516,6 +660,62 @@ mod tests {
         assert_eq!(
             Provider::parse("codex-subscription").unwrap(),
             Provider::CodexBroker
+        );
+    }
+
+    #[test]
+    fn parses_named_chat_presets() {
+        for alias in [
+            "grok",
+            "xai",
+            "kimi",
+            "moonshot",
+            "pi",
+            "inflection",
+            "deepseek",
+            "gemini",
+            "google",
+            "groq",
+            "mistral",
+            "openrouter",
+            "qwen",
+            "dashscope",
+            "together",
+            "fireworks",
+            "perplexity",
+        ] {
+            assert_eq!(
+                Provider::parse(alias).unwrap(),
+                Provider::OpenAiChat,
+                "{alias}"
+            );
+        }
+        assert_eq!(Provider::parse("claude").unwrap(), Provider::Anthropic);
+        assert!(Provider::parse("not-a-provider").is_err());
+        assert_eq!(
+            chat_preset("grok").unwrap().base_url,
+            Some("https://api.x.ai/v1")
+        );
+        assert_eq!(
+            chat_preset("kimi").unwrap().default_model,
+            Some("kimi-k2.5")
+        );
+        assert_eq!(chat_preset("pi").unwrap().base_url, None);
+    }
+
+    #[test]
+    fn joins_anthropic_gateway_urls() {
+        assert_eq!(
+            join_anthropic_messages_url(None),
+            "https://api.anthropic.com/v1/messages"
+        );
+        assert_eq!(
+            join_anthropic_messages_url(Some("https://api.chr1.com")),
+            "https://api.chr1.com/v1/messages"
+        );
+        assert_eq!(
+            join_anthropic_messages_url(Some("https://api.chr1.com/v1")),
+            "https://api.chr1.com/v1/messages"
         );
     }
 }
