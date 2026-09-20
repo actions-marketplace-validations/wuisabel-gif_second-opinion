@@ -186,13 +186,15 @@ impl Provider {
                     .or_else(|| non_empty_env("OPENAI_API_KEY"))
                     .context("OPENAI_API_KEY or REVIEW_API_KEY not set")?,
             )),
-            Self::OpenAiChat => Ok(generic
-                .or_else(|| non_empty_env("OPENAI_API_KEY"))
-                .or_else(|| {
-                    env_chat_preset()
-                        .and_then(|preset| preset.api_key_env)
-                        .and_then(non_empty_env)
-                })),
+            Self::OpenAiChat => {
+                Ok(generic
+                    .or_else(|| non_empty_env("OPENAI_API_KEY"))
+                    .or_else(|| {
+                        env_chat_preset()
+                            .and_then(|preset| preset.api_key_env)
+                            .and_then(non_empty_env)
+                    }))
+            }
             Self::CodexCli | Self::CodexBroker => Ok(None),
             Self::Webhook => Ok(generic),
         }
@@ -432,7 +434,8 @@ fn run_webhook(
 }
 
 fn review_base_url() -> Result<String> {
-    if let Some(url) = non_empty_env("REVIEW_BASE_URL").or_else(|| non_empty_env("OPENAI_BASE_URL")) {
+    if let Some(url) = non_empty_env("REVIEW_BASE_URL").or_else(|| non_empty_env("OPENAI_BASE_URL"))
+    {
         return Ok(url);
     }
     if let Some(preset) = env_chat_preset() {
@@ -642,8 +645,22 @@ mod tests {
     #[test]
     fn parses_named_chat_presets() {
         for alias in [
-            "grok", "xai", "kimi", "moonshot", "pi", "inflection", "deepseek", "gemini", "google",
-            "groq", "mistral", "openrouter", "qwen", "dashscope", "together", "fireworks",
+            "grok",
+            "xai",
+            "kimi",
+            "moonshot",
+            "pi",
+            "inflection",
+            "deepseek",
+            "gemini",
+            "google",
+            "groq",
+            "mistral",
+            "openrouter",
+            "qwen",
+            "dashscope",
+            "together",
+            "fireworks",
             "perplexity",
         ] {
             assert_eq!(
@@ -654,8 +671,14 @@ mod tests {
         }
         assert_eq!(Provider::parse("claude").unwrap(), Provider::Anthropic);
         assert!(Provider::parse("not-a-provider").is_err());
-        assert_eq!(chat_preset("grok").unwrap().base_url, Some("https://api.x.ai/v1"));
-        assert_eq!(chat_preset("kimi").unwrap().default_model, Some("kimi-k2.5"));
+        assert_eq!(
+            chat_preset("grok").unwrap().base_url,
+            Some("https://api.x.ai/v1")
+        );
+        assert_eq!(
+            chat_preset("kimi").unwrap().default_model,
+            Some("kimi-k2.5")
+        );
         assert_eq!(chat_preset("pi").unwrap().base_url, None);
     }
 }
