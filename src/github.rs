@@ -28,6 +28,12 @@ pub struct ReviewInput {
     pub rules: String,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ReviewTarget {
+    PullRequest { number: u64 },
+    Commit { sha: String, before: String },
+}
+
 struct PullRefs {
     head_commit: String,
     base_commit: String,
@@ -48,16 +54,40 @@ pub fn required_env(name: &str) -> Result<String> {
         .with_context(|| format!("{name} not set"))
 }
 
-pub fn pr_number() -> Result<u64> {
+pub fn detect_review_target() -> Result<ReviewTarget> {
     if let Ok(number) = env::var("PR_NUMBER") {
-        return number.parse().context("PR_NUMBER is not a number");
+        return Ok(ReviewTarget::PullRequest {
+            number: number.parse().context("PR_NUMBER is not a number")?,
+        });
     }
     let path = required_env("GITHUB_EVENT_PATH")?;
     let event: Value = serde_json::from_str(&fs::read_to_string(&path)?)?;
-    event["pull_request"]["number"]
+    target_from_event(&event)
+}
+
+fn target_from_event(event: &Value) -> Result<ReviewTarget> {
+    if let Some(number) = event["pull_request"]["number"]
         .as_u64()
         .or_else(|| event["issue"]["number"].as_u64())
-        .context("could not find a PR number in the event payload")
+    {
+        return Ok(ReviewTarget::PullRequest { number });
+    }
+    let sha = event["after"]
+        .as_str()
+        .or_else(|| event["head_commit"]["id"].as_str())
+        .context("could not find a PR number or push commit in the event payload")?;
+    if is_zero_oid(sha) {
+        bail!("push deleted a ref; nothing to review");
+    }
+    let before = event["before"].as_str().unwrap_or("").to_string();
+    Ok(ReviewTarget::Commit {
+        sha: sha.to_string(),
+        before,
+    })
+}
+
+fn is_zero_oid(value: &str) -> bool {
+    !value.is_empty() && value.chars().all(|ch| ch == '0')
 }
 
 pub fn head_is_expected(token: &str, repo: &str, pr: u64) -> Result<bool> {
@@ -100,8 +130,33 @@ fn expected_head_matches(expected: Option<&str>, actual: &str) -> bool {
     expected.map(|value| value == actual).unwrap_or(true)
 }
 
-pub fn load_review_input(token: &str, repo: &str, pr: u64) -> Result<ReviewInput> {
-    let diff = truncate_utf8(&fetch_diff(token, repo, pr)?, MAX_DIFF_BYTES);
+pub fn load_review_input(token: &str, repo: &str, target: &ReviewTarget) -> Result<ReviewInput> {
+    let (diff, refs, changed) = match target {
+        ReviewTarget::PullRequest { number } => {
+            let diff = truncate_utf8(&fetch_diff(token, repo, *number)?, MAX_DIFF_BYTES);
+            let refs = fetch_pull_refs(token, repo, *number)?;
+            let changed = fetch_changed_files(token, repo, *number).unwrap_or_default();
+            (diff, refs, changed)
+        }
+        ReviewTarget::Commit { sha, before } => {
+            let before = resolve_before_sha(token, repo, sha, before)?;
+            let diff = truncate_utf8(
+                &fetch_compare_diff(token, repo, &before, sha)?,
+                MAX_DIFF_BYTES,
+            );
+            let changed = fetch_compare_files(token, repo, &before, sha).unwrap_or_default();
+            (
+                diff,
+                PullRefs {
+                    head_commit: sha.clone(),
+                    base_commit: before,
+                    head_repo: repo.to_string(),
+                    base_repo: repo.to_string(),
+                },
+                changed,
+            )
+        }
+    };
     let commentable = commentable_lines(&diff);
     if diff.trim().is_empty() {
         return Ok(ReviewInput {
@@ -112,7 +167,6 @@ pub fn load_review_input(token: &str, repo: &str, pr: u64) -> Result<ReviewInput
         });
     }
 
-    let refs = fetch_pull_refs(token, repo, pr)?;
     let rules = match fetch_commit_tree_sha(token, &refs.base_repo, &refs.base_commit)
         .and_then(|tree| fetch_review_rules(token, &refs.base_repo, &tree))
     {
@@ -127,7 +181,7 @@ pub fn load_review_input(token: &str, repo: &str, pr: u64) -> Result<ReviewInput
         String::new()
     } else {
         match fetch_commit_tree_sha(token, &refs.head_repo, &refs.head_commit).and_then(|tree| {
-            fetch_repository_context(token, repo, &refs.head_repo, pr, &tree, budget)
+            fetch_repository_context(token, &refs.head_repo, &changed, &tree, budget)
         }) {
             Ok(context) => context,
             Err(error) => {
@@ -142,6 +196,33 @@ pub fn load_review_input(token: &str, repo: &str, pr: u64) -> Result<ReviewInput
         context,
         rules,
     })
+}
+
+fn resolve_before_sha(token: &str, repo: &str, sha: &str, before: &str) -> Result<String> {
+    if !before.is_empty() && !is_zero_oid(before) {
+        return Ok(before.to_string());
+    }
+    let url = format!("https://api.github.com/repos/{repo}/commits/{sha}");
+    let value = github_json(token, &url)?;
+    value["parents"]
+        .as_array()
+        .and_then(|parents| parents.first())
+        .and_then(|parent| parent["sha"].as_str())
+        .map(str::to_string)
+        .context("commit has no parent to diff against")
+}
+
+pub fn commit_has_open_pull(token: &str, repo: &str, sha: &str) -> Result<bool> {
+    let url = format!("https://api.github.com/repos/{repo}/commits/{sha}/pulls");
+    let value = github_json(token, &url)?;
+    Ok(value
+        .as_array()
+        .map(|pulls| {
+            pulls.iter().any(|pull| {
+                pull["state"].as_str() == Some("open") && pull["head"]["sha"].as_str() == Some(sha)
+            })
+        })
+        .unwrap_or(false))
 }
 
 fn context_budget() -> Result<usize> {
@@ -199,6 +280,45 @@ fn fetch_commit_tree_sha(token: &str, repo: &str, commit_sha: &str) -> Result<St
         .as_str()
         .context("commit response missing tree SHA")
         .map(str::to_string)
+}
+
+fn fetch_compare_diff(token: &str, repo: &str, base: &str, head: &str) -> Result<String> {
+    let url = format!("https://api.github.com/repos/{repo}/compare/{base}...{head}");
+    let response = github_request(token, &url)
+        .set("Accept", "application/vnd.github.v3.diff")
+        .call()
+        .context("fetching commit compare diff failed")?;
+    let (bytes, _) = read_response_prefix(response, MAX_DIFF_BYTES)?;
+    Ok(String::from_utf8_lossy(&bytes).into_owned())
+}
+
+fn fetch_compare_files(
+    token: &str,
+    repo: &str,
+    base: &str,
+    head: &str,
+) -> Result<Vec<ChangedFile>> {
+    let url = format!("https://api.github.com/repos/{repo}/compare/{base}...{head}");
+    let value = github_json(token, &url)?;
+    let mut files = Vec::new();
+    let Some(entries) = value["files"].as_array() else {
+        return Ok(files);
+    };
+    for entry in entries {
+        if entry["status"] == "removed" {
+            continue;
+        }
+        if let (Some(path), Some(sha)) = (entry["filename"].as_str(), entry["sha"].as_str()) {
+            files.push(ChangedFile {
+                path: path.to_string(),
+                sha: sha.to_string(),
+            });
+            if files.len() >= MAX_CHANGED_FILES {
+                break;
+            }
+        }
+    }
+    Ok(files)
 }
 
 fn fetch_changed_files(token: &str, repo: &str, pr: u64) -> Result<Vec<ChangedFile>> {
@@ -294,19 +414,17 @@ fn fetch_review_rules(token: &str, repo: &str, base_sha: &str) -> Result<String>
 
 fn fetch_repository_context(
     token: &str,
-    pull_repo: &str,
     content_repo: &str,
-    pr: u64,
+    changed: &[ChangedFile],
     head_tree: &str,
     budget: usize,
 ) -> Result<String> {
-    let changed = fetch_changed_files(token, pull_repo, pr)?;
     let tree = fetch_tree(token, content_repo, head_tree, true)?;
     let mut output = String::new();
     let mut changed_contents = Vec::new();
 
     let mut attempted_blobs = 0_usize;
-    for file in &changed {
+    for file in changed {
         if output.len() >= budget {
             break;
         }
@@ -629,6 +747,76 @@ pub fn post_review(
     }
 }
 
+pub fn post_commit_review(
+    token: &str,
+    repo: &str,
+    sha: &str,
+    review: ReviewOutput,
+    commentable: &BTreeMap<String, BTreeSet<u64>>,
+) -> Result<()> {
+    let mut annotations = Vec::new();
+    let mut orphaned = Vec::new();
+    for finding in &review.findings {
+        let valid = commentable
+            .get(&finding.path)
+            .map(|lines| lines.contains(&finding.line))
+            .unwrap_or(false);
+        if valid && annotations.len() < MAX_COMMENTS {
+            let line = finding.line.max(1);
+            annotations.push(json!({
+                "path": finding.path,
+                "start_line": line,
+                "end_line": line,
+                "annotation_level": annotation_level(&finding.severity),
+                "message": finding.comment,
+            }));
+        } else {
+            orphaned.push(format!(
+                "- `{}:{}` [{}] {}",
+                finding.path, finding.line, finding.severity, finding.comment
+            ));
+        }
+    }
+
+    let mut summary = review.summary;
+    if let Some(run_id) = review_run_id()? {
+        summary.push_str(&format!("\n\n<!-- second-opinion-run:{run_id} -->"));
+    }
+    if !orphaned.is_empty() {
+        summary.push_str("\n\n**Findings outside the diff or comment limit:**\n");
+        summary.push_str(&orphaned.join("\n"));
+    }
+
+    let url = format!("https://api.github.com/repos/{repo}/check-runs");
+    let payload = json!({
+        "name": "second-opinion",
+        "head_sha": sha,
+        "status": "completed",
+        "conclusion": "neutral",
+        "output": {
+            "title": "second-opinion review",
+            "summary": summary,
+            "annotations": annotations,
+        }
+    });
+    github_post_request(token, &url)
+        .send_json(payload)
+        .context("posting commit check run failed")?;
+    eprintln!(
+        "Posted commit check run on {sha} with {} annotations.",
+        annotations.len()
+    );
+    Ok(())
+}
+
+fn annotation_level(severity: &str) -> &'static str {
+    match severity {
+        "high" => "failure",
+        "low" => "notice",
+        _ => "warning",
+    }
+}
+
 fn github_request(token: &str, url: &str) -> ureq::Request {
     ureq::get(url)
         .set("Authorization", &format!("Bearer {token}"))
@@ -809,6 +997,32 @@ mod tests {
         ];
         let values = fingerprints_from_comments(&comments, "github-actions[bot]");
         assert_eq!(values, BTreeSet::from(["trusted".to_string()]));
+    }
+
+    #[test]
+    fn detects_push_and_pull_targets() {
+        let pull = json!({"pull_request":{"number":11}});
+        assert_eq!(
+            target_from_event(&pull).unwrap(),
+            ReviewTarget::PullRequest { number: 11 }
+        );
+        let push = json!({
+            "after": "abc123",
+            "before": "0000000000000000000000000000000000000000"
+        });
+        assert_eq!(
+            target_from_event(&push).unwrap(),
+            ReviewTarget::Commit {
+                sha: "abc123".into(),
+                before: "0000000000000000000000000000000000000000".into(),
+            }
+        );
+        let deleted = json!({"after": "0000000000000000000000000000000000000000"});
+        assert!(target_from_event(&deleted).is_err());
+        assert!(is_zero_oid("0000000000000000000000000000000000000000"));
+        assert!(!is_zero_oid("abc123"));
+        assert_eq!(annotation_level("high"), "failure");
+        assert_eq!(annotation_level("medium"), "warning");
     }
 
     #[test]

@@ -3,16 +3,20 @@ name: Second-Opinion
 on:
   pull_request_target:
     types: [opened, synchronize, reopened]
+  push:
+    branches:
+      - "**"
 
 permissions:
   contents: read
-  id-token: write # Required only when REVIEW_BROKER_URL selects codex-broker.
+  id-token: write # Required only when REVIEW_BROKER_URL selects Codex-broker.
   pull-requests: write
+  checks: write # Required to annotate commits that have no pull request.
 
 # Serializes direct Codex runs that share one rotating refresh-token chain.
 # Broker and API-key deployments may choose a narrower per-PR group instead.
 concurrency:
-  group: second-opinion-${{ github.repository }}
+  group: second-opinion-${{ github.repository }}-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: false
 
 jobs:

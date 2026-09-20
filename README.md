@@ -9,7 +9,7 @@ An agent-agnostic AI code reviewer, written in Rust and packaged as a reusable G
 1. Copy [`examples/review.yml`](examples/review.yml) to `.github/workflows/review.yml` in the repository you want to review.
 2. Add the selected credential: `REVIEW_API_KEY` for API providers, `CODEX_AUTH_JSON` for direct Codex mode, or enroll the repository with a Codex broker so no model credential is stored in GitHub.
 3. Set `REVIEW_PROVIDER` and any adapter-specific values as repository Actions variables. Setting `REVIEW_BROKER_URL` automatically selects broker mode in the example workflow.
-4. Open or update a pull request.
+4. Open a pull request, or push a commit. Pull requests get line comments. Commits with no PR get a Check Run on that SHA.
 
 The reusable action can also be added directly:
 
@@ -22,7 +22,7 @@ The reusable action can also be added directly:
     model: ${{ vars.REVIEW_MODEL }}
 ```
 
-Pinning a full commit SHA instead of a release tag provides the strongest supply-chain protection. The installation workflow uses `pull_request_target` but never checks out or executes the pull request head; it treats the fetched diff only as review input.
+Pinning a full commit SHA instead of a release tag provides the strongest supply-chain protection. The installation workflow uses `pull_request_target` for pull requests and `push` for commits with no PR. It never checks out or executes untrusted head code; it treats the fetched diff only as review input. Push reviews skip when the commit is already the head of an open pull request, so you do not get a duplicate Check plus PR review.
 
 ### Optional hosted GitHub App
 
