@@ -3,14 +3,18 @@ name: SecondOpinion
 on:
   pull_request_target:
     types: [opened, synchronize, reopened]
+  push:
+    branches:
+      - "**"
 
 permissions:
   contents: read
   id-token: write
   pull-requests: write
+  checks: write
 
 concurrency:
-  group: second-opinion-${{ github.repository }}
+  group: second-opinion-${{ github.repository }}-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: false
 
 jobs:
@@ -35,7 +39,7 @@ jobs:
         if: env.REVIEW_API_KEY != '' || env.CODEX_AUTH_JSON != '' || env.REVIEW_ENDPOINT != '' || env.REVIEW_BROKER_URL != ''
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
-          ref: ${{ github.event.pull_request.base.sha }}
+          ref: ${{ github.event.pull_request.base.sha || github.sha }}
           persist-credentials: false
 
       - name: Review pull request
