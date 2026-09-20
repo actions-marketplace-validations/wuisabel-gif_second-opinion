@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>second-opinion — Agent-agnostic AI pull request review</title>
-<meta name="description" content="Change the agent, not the reviewer. Line-level AI pull request reviews through Anthropic, OpenAI, webhooks, or a ChatGPT/Codex subscription.">
+<meta name="description" content="Change the agent, not the reviewer. Line-level AI pull request reviews through Claude, Grok, Kimi, Pi, OpenAI, webhooks, or a ChatGPT/Codex subscription.">
 <meta name="theme-color" content="#f6f2ea">
 <link rel="canonical" href="https://wuisabel-gif.github.io/second-opinion/">
 <meta property="og:title" content="second-opinion — AI pull request review">
@@ -230,9 +230,9 @@
       <p class="eyebrow">Agent-agnostic AI code review</p>
       <h1>Change the agent,<br>not the <em>reviewer</em>.</h1>
       <p class="deck">Line-level AI pull request review, packaged as one GitHub Action.</p>
-      <p class="lead">Use Anthropic, OpenAI, your own webhook, or an eligible Codex subscription. Run it as an Action or install the hosted GitHub App—every path returns the same precise line-level findings.</p>
+      <p class="lead">Use Claude, Grok, Kimi, Pi, OpenAI, your own webhook, or an eligible Codex subscription. Run it as an Action or install the hosted GitHub App—every path returns the same precise line-level findings.</p>
       <div class="cta-row">
-        <a class="btn primary" href="https://github.com/marketplace/actions/second-opinion-ai-code-review-action">Install from Marketplace →</a>
+        <a class="btn primary" href="https://github.com/marketplace/actions/second-opinion-agent-agnostic-pr-review">Install from Marketplace →</a>
         <a class="btn ghost" href="https://github.com/wuisabel-gif/second-opinion">View GitHub</a>
         <a class="btn ghost" href="#install">Setup ↓</a>
       </div>
@@ -267,7 +267,7 @@
   <div class="shell">
     <div class="section-head" data-reveal>
       <h2>Plug it into GitHub</h2>
-      <p class="intro">Choose your path: an API key, a ChatGPT-authenticated Codex login, or the hosted GitHub App with service-managed credentials. Credentials never belong in the workflow file.</p>
+      <p class="intro">GitHub setup is two values: a secret for the key, a variable for the model backend. Credentials never belong in the workflow file.</p>
     </div>
 
     <div class="install-grid" data-reveal>
@@ -275,8 +275,8 @@
         <div class="step">
           <span class="num">01</span>
           <div>
-            <h3>Choose model access</h3>
-            <p>Use <code>REVIEW_API_KEY</code>, run <code>codex login</code> once and save <code>CODEX_AUTH_JSON</code>, or use the hosted App without a repository credential.</p>
+            <h3>Set the secret and provider</h3>
+            <p>Repo Settings → Secrets and variables → Actions. Put the vendor key in secret <code>REVIEW_API_KEY</code>. Set variable <code>REVIEW_PROVIDER</code> to <code>claude</code>, <code>grok</code>, <code>kimi</code>, or <code>pi</code>. For Pi also set <code>REVIEW_BASE_URL</code> to an OpenAI-compatible gateway. Codex instead uses secret <code>CODEX_AUTH_JSON</code>.</p>
           </div>
         </div>
         <div class="step">
@@ -320,9 +320,10 @@
           <span class="k">api-key:</span> ${{ secrets.REVIEW_API_KEY }}
           <span class="k">provider:</span> ${{ vars.REVIEW_PROVIDER || 'anthropic' }}
           <span class="k">model:</span> ${{ vars.REVIEW_MODEL }}
+          <span class="k">base-url:</span> ${{ vars.REVIEW_BASE_URL }}
           <span class="k">codex-auth-json:</span> ${{ secrets.CODEX_AUTH_JSON }}</pre>
         </div>
-        <p class="config-note">Webhooks, consensus passes, and vote thresholds: <a href="https://github.com/wuisabel-gif/second-opinion/blob/main/examples/review.yml">full configuration →</a></p>
+        <p class="config-note">Pin <code class="inline-code">wuisabel-gif/second-opinion@v0.4.0</code>, not the older Marketplace action. Examples: <code class="inline-code">REVIEW_PROVIDER=grok</code>, <code class="inline-code">kimi</code>, <code class="inline-code">claude</code>. Pi needs <code class="inline-code">REVIEW_BASE_URL</code>. Full options: <a href="https://github.com/wuisabel-gif/second-opinion/blob/main/examples/review.yml">examples/review.yml →</a></p>
       </div>
     </div>
   </div>
@@ -332,20 +333,32 @@
   <div class="shell">
     <div class="section-head" data-reveal>
       <h2>One reviewer,<br>any agent</h2>
-      <p class="intro">Swap providers with a single repository variable — the review contract, comment format, and deduplication stay identical.</p>
+      <p class="intro">Same workflow for every backend. Change <code class="inline-code">REVIEW_PROVIDER</code> and the key in <code class="inline-code">REVIEW_API_KEY</code>. The review contract, comments, and deduplication stay identical.</p>
     </div>
     <div class="rows" data-reveal>
       <div class="row">
-        <h3>Anthropic<span class="tag">default</span></h3>
-        <p>Native Messages API. Set <code class="inline-code">REVIEW_API_KEY</code> to an Anthropic key and you’re done.</p>
+        <h3>Claude<span class="tag">default</span></h3>
+        <p>Secret <code class="inline-code">REVIEW_API_KEY</code> = Anthropic key. Leave <code class="inline-code">REVIEW_PROVIDER</code> unset, or set it to <code class="inline-code">claude</code>.</p>
+      </div>
+      <div class="row">
+        <h3>Grok</h3>
+        <p>Secret <code class="inline-code">REVIEW_API_KEY</code> = xAI key. Variable <code class="inline-code">REVIEW_PROVIDER=grok</code>. Optional <code class="inline-code">REVIEW_MODEL</code>; default is <code class="inline-code">grok-4</code>.</p>
+      </div>
+      <div class="row">
+        <h3>Kimi</h3>
+        <p>Secret <code class="inline-code">REVIEW_API_KEY</code> = Moonshot key. Variable <code class="inline-code">REVIEW_PROVIDER=kimi</code>. Default model <code class="inline-code">kimi-k2.5</code>.</p>
+      </div>
+      <div class="row">
+        <h3>Pi</h3>
+        <p>Inflection has no public chat API, so point at a gateway. Variable <code class="inline-code">REVIEW_PROVIDER=pi</code> and <code class="inline-code">REVIEW_BASE_URL=https://your-gateway/v1</code>. Add the gateway key as <code class="inline-code">REVIEW_API_KEY</code> when it requires one.</p>
       </div>
       <div class="row">
         <h3>OpenAI</h3>
-        <p>Responses API with structured JSON output. Set <code class="inline-code">REVIEW_PROVIDER=openai-responses</code>.</p>
+        <p>Secret <code class="inline-code">REVIEW_API_KEY</code> = OpenAI key. Variable <code class="inline-code">REVIEW_PROVIDER=openai-responses</code>.</p>
       </div>
       <div class="row">
-        <h3>OpenAI-compatible</h3>
-        <p>LiteLLM, vLLM, Ollama, cloud gateways — point <code class="inline-code">REVIEW_BASE_URL</code> at any chat-completions endpoint.</p>
+        <h3>Also wired</h3>
+        <p>Same secret, different variable: <code class="inline-code">deepseek</code>, <code class="inline-code">gemini</code>, <code class="inline-code">groq</code>, <code class="inline-code">mistral</code>, <code class="inline-code">openrouter</code>, <code class="inline-code">qwen</code>, <code class="inline-code">together</code>, <code class="inline-code">fireworks</code>, <code class="inline-code">perplexity</code>. Anything else: <code class="inline-code">openai-compatible</code> plus <code class="inline-code">REVIEW_BASE_URL</code> and <code class="inline-code">REVIEW_MODEL</code>.</p>
       </div>
       <div class="row">
         <h3>Codex CLI<span class="tag">subscription</span></h3>
@@ -376,7 +389,7 @@
       <a href="https://github.com/wuisabel-gif/second-opinion/releases/tag/v0.3.1">
         <span>Release v0.3.1 — webhook starter, Pullfrog workflow, growth-control policy</span><span class="go">release notes →</span>
       </a>
-      <a href="https://github.com/marketplace/actions/second-opinion-ai-code-review-action">
+      <a href="https://github.com/marketplace/actions/second-opinion-agent-agnostic-pr-review">
         <span>GitHub Marketplace listing</span><span class="go">marketplace →</span>
       </a>
       <a href="https://github.com/wuisabel-gif/second-opinion/issues">

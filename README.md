@@ -2,7 +2,7 @@
 
 > **Change the agent, not the reviewer.**
 
-An agent-agnostic AI code reviewer, written in Rust and packaged as a reusable GitHub Action. It supports native Anthropic and OpenAI APIs, OpenAI-compatible services, direct or brokered Codex subscription login, and an HTTP webhook contract for any other hosted or local AI agent.
+An agent-agnostic AI code reviewer, written in Rust and packaged as a reusable GitHub Action. It supports Claude, Grok, Kimi, Pi, native Anthropic and OpenAI APIs, other OpenAI-compatible services, direct or brokered Codex subscription login, and an HTTP webhook contract for any other hosted or local AI agent.
 
 ## Install
 
@@ -79,9 +79,13 @@ Choose an adapter and add its credential under Settings, Secrets and variables, 
 
 | Adapter | `REVIEW_PROVIDER` | Required configuration | Typical services |
 |---|---|---|---|
-| Anthropic Messages | `anthropic` | `REVIEW_API_KEY`; optional `REVIEW_MODEL` | Claude |
+| Anthropic Messages | `anthropic` or `claude` | `REVIEW_API_KEY`; optional `REVIEW_MODEL` | Claude |
 | OpenAI Responses | `openai` or `openai-responses` | `REVIEW_API_KEY`; optional `REVIEW_MODEL` | OpenAI GPT models |
-| OpenAI-compatible Chat Completions | `openai-compatible` | `REVIEW_BASE_URL`, `REVIEW_MODEL`; API key when required | OpenRouter, Groq, Mistral, xAI, DeepSeek, Ollama, LM Studio, and compatible gateways |
+| Grok | `grok` or `xai` | `REVIEW_API_KEY` or `XAI_API_KEY`; optional `REVIEW_MODEL` | xAI Grok |
+| Kimi | `kimi` or `moonshot` | `REVIEW_API_KEY` or `MOONSHOT_API_KEY`; optional `REVIEW_MODEL` | Moonshot Kimi |
+| Pi | `pi` or `inflection` | `REVIEW_BASE_URL`; API key when required | Inflection Pi through an OpenAI-compatible gateway |
+| Named chat backends | `deepseek`, `gemini`, `groq`, `mistral`, `openrouter`, `qwen`, `together`, `fireworks`, `perplexity` | `REVIEW_API_KEY` or the vendor key; `REVIEW_MODEL` when the backend has no default | Cloud chat-completions APIs |
+| OpenAI-compatible Chat Completions | `openai-compatible` | `REVIEW_BASE_URL`, `REVIEW_MODEL`; API key when required | Ollama, LM Studio, LiteLLM, vLLM, and any other compatible gateway |
 | Direct Codex subscription | `codex` | `CODEX_AUTH_JSON`; optional `REVIEW_MODEL` | Official Codex CLI on the Actions runner |
 | Codex subscription broker | `codex-broker` | `REVIEW_BROKER_URL`, `REVIEW_BROKER_AUDIENCE`; optional `REVIEW_MODEL` | Official Codex CLI using broker-held ChatGPT auth |
 | Generic webhook | `webhook` | `REVIEW_ENDPOINT`; optional `REVIEW_API_KEY` and `REVIEW_MODEL` | Any agent exposed through an HTTP adapter |
@@ -100,6 +104,14 @@ Or run with OpenAI:
 GITHUB_TOKEN=ghp_... OPENAI_API_KEY=sk-... \
 GITHUB_REPOSITORY=owner/repo PR_NUMBER=42 \
 REVIEW_PROVIDER=openai cargo run --release
+```
+
+Run Grok:
+
+```bash
+GITHUB_TOKEN=ghp_... XAI_API_KEY=xai-... \
+GITHUB_REPOSITORY=owner/repo PR_NUMBER=42 \
+REVIEW_PROVIDER=grok cargo run --release
 ```
 
 Run an OpenAI-compatible local or hosted model:
@@ -149,8 +161,8 @@ Responses wrapped in `review`, `output`, `result`, or `data` are also accepted, 
 
 ## Configuration
 
-- `REVIEW_PROVIDER`: `anthropic`, `openai-responses`, `openai-compatible`, `codex`, `codex-broker`, or `webhook`. Aliases include `claude`, `openai`, `openai-chat`, `chat-completions`, `codex-cli`, `chatgpt-subscription`, `codex-subscription` (broker), and `custom`.
-- `REVIEW_MODEL`: provider-specific model. It defaults to `claude-sonnet-4-6` for Anthropic and `gpt-5.6-sol` for OpenAI Responses; it is required for OpenAI-compatible services and optional for webhooks.
+- `REVIEW_PROVIDER`: `anthropic`, `openai-responses`, `openai-compatible`, `codex`, `codex-broker`, or `webhook`. Named chat backends include `claude`, `grok`, `kimi`, `pi`, `deepseek`, `gemini`, `groq`, `mistral`, `openrouter`, `qwen`, `together`, `fireworks`, and `perplexity`. Other aliases include `openai`, `xai`, `moonshot`, `inflection`, `google`, `dashscope`, `openai-chat`, `chat-completions`, `codex-cli`, `chatgpt-subscription`, `codex-subscription` (broker), and `custom`.
+- `REVIEW_MODEL`: provider-specific model. It defaults to `claude-sonnet-4-6` for Anthropic, `gpt-5.6-sol` for OpenAI Responses, and a vendor default for named chat backends such as Grok and Kimi. It is required for generic `openai-compatible` services and optional for webhooks.
 - `REVIEW_API_KEY`: provider credential used by the supplied GitHub Actions workflow.
 - `ANTHROPIC_API_KEY`: backward-compatible alternative to `REVIEW_API_KEY` for local Anthropic runs.
 - `OPENAI_API_KEY`: backward-compatible alternative to `REVIEW_API_KEY` for local OpenAI and OpenAI-compatible runs.
