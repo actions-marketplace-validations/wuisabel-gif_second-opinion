@@ -166,7 +166,7 @@ Responses wrapped in `review`, `output`, `result`, or `data` are also accepted, 
 - `REVIEW_API_KEY`: provider credential used by the supplied GitHub Actions workflow.
 - `ANTHROPIC_API_KEY`: backward-compatible alternative to `REVIEW_API_KEY` for local Anthropic runs.
 - `OPENAI_API_KEY`: backward-compatible alternative to `REVIEW_API_KEY` for local OpenAI and OpenAI-compatible runs.
-- `REVIEW_BASE_URL`: base URL for OpenAI-compatible APIs. It falls back to `OPENAI_BASE_URL`, then `https://api.openai.com/v1`.
+- `REVIEW_BASE_URL`: base URL for OpenAI-compatible APIs, and for Anthropic-compatible gateways when `REVIEW_PROVIDER` is `anthropic` or `claude`. OpenAI-compatible calls fall back to `OPENAI_BASE_URL`, then `https://api.openai.com/v1`. Anthropic calls also accept `ANTHROPIC_BASE_URL` and otherwise use `https://api.anthropic.com`.
 - `REVIEW_ENDPOINT`: exact URL for the generic webhook adapter.
 - `CODEX_AUTH_JSON`: base64-encoded ChatGPT-mode Codex `auth.json`, required only for direct `codex` mode.
 - `CODEX_BIN`: Codex executable override; defaults to `codex`.

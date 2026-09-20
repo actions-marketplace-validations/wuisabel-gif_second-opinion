@@ -16,7 +16,7 @@ inputs:
     required: false
     default: ""
   base-url:
-    description: Base URL for OpenAI-compatible APIs
+    description: Base URL for Anthropic-compatible or OpenAI-compatible APIs
     required: false
     default: ""
   endpoint:

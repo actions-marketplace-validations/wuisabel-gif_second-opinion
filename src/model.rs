@@ -353,7 +353,7 @@ fn run_anthropic(api_key: &str, model: &str, request: &ReviewRequest<'_>) -> Res
         "system": review_system_prompt(),
         "messages": [{ "role": "user", "content": request.user_message() }],
     });
-    let response = ureq::post("https://api.anthropic.com/v1/messages")
+    let response = ureq::post(&anthropic_messages_url())
         .set("x-api-key", api_key)
         .set("anthropic-version", ANTHROPIC_VERSION)
         .set("content-type", "application/json")
@@ -431,6 +431,27 @@ fn run_webhook(
     });
     let response = send_generic_request(&url, "review webhook", api_key, body)?;
     parse_generic_review_response(&response)
+}
+
+fn anthropic_messages_url() -> String {
+    join_anthropic_messages_url(
+        non_empty_env("ANTHROPIC_BASE_URL")
+            .or_else(|| non_empty_env("REVIEW_BASE_URL"))
+            .as_deref(),
+    )
+}
+
+fn join_anthropic_messages_url(base: Option<&str>) -> String {
+    let base = base
+        .unwrap_or("https://api.anthropic.com")
+        .trim_end_matches('/');
+    if base.ends_with("/messages") {
+        return base.to_string();
+    }
+    if base.ends_with("/v1") {
+        return format!("{base}/messages");
+    }
+    format!("{base}/v1/messages")
 }
 
 fn review_base_url() -> Result<String> {
@@ -680,5 +701,21 @@ mod tests {
             Some("kimi-k2.5")
         );
         assert_eq!(chat_preset("pi").unwrap().base_url, None);
+    }
+
+    #[test]
+    fn joins_anthropic_gateway_urls() {
+        assert_eq!(
+            join_anthropic_messages_url(None),
+            "https://api.anthropic.com/v1/messages"
+        );
+        assert_eq!(
+            join_anthropic_messages_url(Some("https://api.chr1.com")),
+            "https://api.chr1.com/v1/messages"
+        );
+        assert_eq!(
+            join_anthropic_messages_url(Some("https://api.chr1.com/v1")),
+            "https://api.chr1.com/v1/messages"
+        );
     }
 }
