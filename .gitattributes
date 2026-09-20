@@ -1,0 +1,6 @@
+# GitHub language stats: this repo is a Rust Action with JS support services.
+broker/** linguist-vendored
+hosted/** linguist-vendored
+webhook/** linguist-vendored
+docs/** linguist-documentation
+*.html linguist-documentation
